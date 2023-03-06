@@ -5,9 +5,9 @@ use std::ops::RangeInclusive;
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, Data, DeriveInput, Field};
 
-use crate::value_map::{ContainerType, RestrictEnum};
+use crate::restrict_enum::{ContainerType, RestrictEnum};
 extern crate quote;
-mod value_map;
+mod restrict_enum;
 
 struct _BitmapInfo {
     field_info: Vec<(Field, RangeInclusive<usize>)>,
