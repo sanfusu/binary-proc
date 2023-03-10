@@ -1,26 +1,11 @@
 use quote::ToTokens;
-use syn::{
-    parse::Parse, punctuated::Punctuated, Data, DeriveInput, Expr, Result, Token,
-    TypePath,
-};
+use syn::{parse::Parse, punctuated::Punctuated, Data, DeriveInput, Expr, Result, Token};
 
 const TOP_LEVEL_PATH: &'static str = "restrict";
 const SECOND_LEVEL_PATH: &'static str = "white_list";
 
 /// (1,2,3,4..=5)
 /// 以 , 分割的字面量数值表达式，且不重合
-pub(crate) struct ContainerType {
-    pub(crate) types: Vec<TypePath>,
-}
-
-impl Parse for ContainerType {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let puncated_types = Punctuated::<TypePath, Token!(,)>::parse_separated_nonempty(input)?;
-        let mut types = Vec::new();
-        puncated_types.into_iter().for_each(|x| types.push(x));
-        Ok(ContainerType { types })
-    }
-}
 
 pub(crate) struct AllowedRange {
     pub(crate) white_list: Vec<Expr>,

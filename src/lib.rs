@@ -2,11 +2,16 @@
 
 use std::ops::RangeInclusive;
 
+use crate::restrict_enum::RestrictEnum;
+use bitmap_struct::BitmapStruct;
+use container_type::ContainerType;
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, Data, DeriveInput, Field};
+use syn::{parse_macro_input, Field};
 
-use crate::restrict_enum::{ContainerType, RestrictEnum};
 extern crate quote;
+
+mod bitmap_struct;
+mod container_type;
 mod restrict_enum;
 
 struct _BitmapInfo {
@@ -16,26 +21,40 @@ struct _BitmapInfo {
 
 #[proc_macro_attribute]
 pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut item = parse_macro_input!(item as DeriveInput);
-    let mut output = proc_macro2::TokenStream::new();
-    if let Data::Struct(mut x) = item.clone().data {
-        x.fields.iter_mut().for_each(|field| {
-            field.attrs.retain(|attr| {
-                if let Some(ident) = attr.path.get_ident() {
-                    ident.to_string() != "pos"
-                } else {
-                    true
-                }
-            })
-        });
-        item.data = Data::Struct(x);
-        let tok = quote::quote! {
-            #item
+    let types = parse_macro_input!(_attr as ContainerType).types;
+    let bitmap = parse_macro_input!(item as BitmapStruct);
+    let ident = bitmap.clean_struct.to_owned().ident;
+    let clean = bitmap.clean_struct.to_owned();
+    let mut bits_read = proc_macro2::TokenStream::new();
+    for field in bitmap.fields {
+        let field_ident = field.ident;
+        let field_pos = field.pos;
+        let field_read = quote::quote! {
+            #field_ident: {
+                let bits = value.bits(#field_pos);
+                bits.read().try_into().map_err(|_| bits.range)
+            }?,
         };
-        output.extend(tok.into_iter());
+        bits_read.extend(field_read);
     }
-    output.into()
+    quote::quote! {
+        #clean
+        #(
+            impl ::core::convert::TryFrom<#types> for #ident {
+                type Error = ::core::ops::RangeInclusive<u32>;
+                fn try_from(value:#types)->Result<Self, Self::Error> {
+                    use ::bits::IntoBits;
+                    use ::bits::BitsOps;
+                    Ok(Self {
+                        #bits_read
+                    })
+                }
+            }
+        )*
+    }
+    .into()
 }
+
 /// ```
 /// #[restrict(u8,u16)]
 /// enum A {
@@ -52,11 +71,10 @@ pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn restrict(_attr: TokenStream, _item: TokenStream) -> TokenStream {
-    let container_type = parse_macro_input!(_attr as ContainerType);
     let restrict_enum = parse_macro_input!(_item as RestrictEnum);
     let clean_enum = restrict_enum.pure_enum;
     let enum_ident = clean_enum.ident.to_owned();
-    let all_type = container_type.types;
+    let all_type = (parse_macro_input!(_attr as ContainerType)).types;
     let mut match_expr = proc_macro2::TokenStream::new();
     restrict_enum.variant.into_iter().for_each(|x| {
         let ident = x.ident;
