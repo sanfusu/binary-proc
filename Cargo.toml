@@ -1,5 +1,5 @@
 [package]
-name = 'binary'
+name = 'binary-proc'
 version = '0.1.0'
 edition = '2021'
 
@@ -9,9 +9,6 @@ proc-macro = true
 [dependencies]
 quote = '1.0.23'
 proc-macro2 = '1.0.51'
-
-[dependencies.bits]
-git = 'https://gitee.com/sanfusu/bits.git'
 
 [dependencies.syn]
 version = '1.0.107'
