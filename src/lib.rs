@@ -43,8 +43,6 @@ pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
             impl ::core::convert::TryFrom<#types> for #ident {
                 type Error = ::core::ops::RangeInclusive<u32>;
                 fn try_from(value:#types)->Result<Self, Self::Error> {
-                    use ::bits::IntoBits;
-                    use ::bits::BitsOps;
                     Ok(Self {
                         #bits_read
                     })
