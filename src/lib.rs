@@ -1,23 +1,17 @@
 #![allow(dead_code)]
 
-use std::ops::RangeInclusive;
-
 use crate::restrict_enum::RestrictEnum;
 use bitmap_struct::BitmapStruct;
 use container_type::ContainerType;
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, Field};
+use syn::parse_macro_input;
 
 extern crate quote;
 
 mod bitmap_struct;
+mod bytemap_struct;
 mod container_type;
 mod restrict_enum;
-
-struct _BitmapInfo {
-    field_info: Vec<(Field, RangeInclusive<usize>)>,
-    container_type: TokenStream,
-}
 
 #[proc_macro_attribute]
 pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -25,6 +19,7 @@ pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let bitmap = parse_macro_input!(item as BitmapStruct);
     let ident = bitmap.clean_struct.to_owned().ident;
     let clean = bitmap.clean_struct.to_owned();
+    let (impl_generics, ty_generics, where_clause) = clean.generics.split_for_impl();
     let mut bits_read = proc_macro2::TokenStream::new();
     for field in bitmap.fields {
         let field_ident = field.ident;
@@ -40,7 +35,7 @@ pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
     quote::quote! {
         #clean
         #(
-            impl ::core::convert::TryFrom<#types> for #ident {
+            impl #impl_generics ::core::convert::TryFrom<#types> for #ident #ty_generics #where_clause {
                 type Error = ::core::ops::RangeInclusive<u32>;
                 fn try_from(value:#types)->Result<Self, Self::Error> {
                     Ok(Self {
@@ -71,6 +66,7 @@ pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn restrict(_attr: TokenStream, _item: TokenStream) -> TokenStream {
     let restrict_enum = parse_macro_input!(_item as RestrictEnum);
     let clean_enum = restrict_enum.pure_enum;
+    let (impl_generics, ty_generics, where_clause) = clean_enum.generics.split_for_impl();
     let enum_ident = clean_enum.ident.to_owned();
     let all_type = (parse_macro_input!(_attr as ContainerType)).types;
     let mut match_expr = proc_macro2::TokenStream::new();
@@ -85,7 +81,7 @@ pub fn restrict(_attr: TokenStream, _item: TokenStream) -> TokenStream {
     quote::quote! {
         #clean_enum
         #(
-            impl ::core::convert::TryFrom<#all_type> for #enum_ident {
+            impl #impl_generics ::core::convert::TryFrom<#all_type> for #enum_ident  #ty_generics #where_clause {
                 type Error = #all_type;
                 fn try_from(value: #all_type) -> Result<Self, Self::Error> {
                     match value {
