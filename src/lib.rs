@@ -2,6 +2,7 @@
 
 use crate::restrict_enum::RestrictEnum;
 use bitmap_struct::BitmapStruct;
+use bytemap_struct::BytemapStruct;
 use container_type::ContainerType;
 use proc_macro::TokenStream;
 use syn::parse_macro_input;
@@ -11,7 +12,39 @@ extern crate quote;
 mod bitmap_struct;
 mod bytemap_struct;
 mod container_type;
+mod literal_pos;
 mod restrict_enum;
+
+#[proc_macro_attribute]
+pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // let types = parse_macro_input!(_attr as ContainerType).types;
+    let bytemap = parse_macro_input!(item as BytemapStruct);
+    let ident = bytemap.clean_struct.to_owned().ident;
+    let clean = bytemap.clean_struct.to_owned();
+    let (impl_generics, ty_generics, where_clause) = clean.generics.split_for_impl();
+    let mut bits_read = proc_macro2::TokenStream::new();
+    for field in bytemap.fields {
+        let field_ident = field.ident;
+        let field_pos = field.pos;
+        let target_type = field.target_type;
+        let field_read = quote::quote! {
+            #field_ident: <#target_type>::try_from(value.get(#field_pos).ok_or(#field_pos)?).map_err(|_|{#field_pos})?,
+        };
+        bits_read.extend(field_read);
+    }
+    quote::quote! {
+        #clean
+        impl #impl_generics ::core::convert::TryFrom<&[u8]> for #ident #ty_generics #where_clause {
+            type Error = ::core::ops::RangeInclusive<usize>;
+            fn try_from(value:&[u8])->Result<Self, Self::Error> {
+                Ok(Self {
+                    #bits_read
+                })
+            }
+        }
+    }
+    .into()
+}
 
 #[proc_macro_attribute]
 pub fn bitmap(_attr: TokenStream, item: TokenStream) -> TokenStream {

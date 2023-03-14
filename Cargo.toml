@@ -17,3 +17,6 @@ features = [
     'extra-traits',
     'parsing',
 ]
+
+[dependencies.bits]
+git = 'https://gitee.com/sanfusu/bits.git'
