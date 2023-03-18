@@ -16,13 +16,18 @@
 //! }
 //! ```
 
+use std::ops::RangeInclusive;
+
 use quote::ToTokens;
-use syn::{parse::Parse, parse2, Data, DeriveInput, Error, Result};
+use syn::{parse::Parse, parse2, Data, DeriveInput, Result};
+
+use crate::literal_pos::range_from_expr;
 
 pub(crate) struct ByteField {
     pub(crate) pos: syn::ExprRange,
     pub(crate) ident: syn::Ident,
     pub(crate) target_type: syn::Type,
+    pub(crate) pos_value: RangeInclusive<usize>,
 }
 
 impl Parse for ByteField {
@@ -59,6 +64,7 @@ impl Parse for ByteField {
             pos: range,
             ident,
             target_type,
+            pos_value: range_from_expr(&pos)?,
         });
     }
 }
@@ -88,24 +94,10 @@ impl Parse for BytemapStruct {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let derive_input = DeriveInput::parse(input)?;
         let mut fields = Vec::<ByteField>::new();
-        let mut current_offset = quote::quote!(0);
         if let Data::Struct(data_struct) = derive_input.to_owned().data {
             for field in data_struct.fields {
                 let token = field.to_token_stream();
-                let target_type = field.to_owned().ty;
-                let fake_field = ByteField {
-                    pos: parse2::<syn::ExprRange>(
-                        quote::quote! {(#current_offset) ..= ((#current_offset) + ::core::mem::size_of::<#target_type>() - 1)},
-                    )?,
-                    ident: field.to_owned().ident.ok_or(Error::new_spanned(
-                        field.to_owned().to_token_stream(),
-                        "Only named fields supported",
-                    ))?,
-                    target_type,
-                };
-                let byte_field = syn::parse2::<ByteField>(token).unwrap_or(fake_field);
-                current_offset = byte_field.pos.to.to_token_stream();
-                current_offset.extend(quote::quote!(+1));
+                let byte_field = syn::parse2::<ByteField>(token)?;
                 fields.push(byte_field);
             }
         }

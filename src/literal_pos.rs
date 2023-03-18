@@ -1,25 +1,49 @@
 use quote::ToTokens;
 use std::ops::RangeInclusive;
-use syn::{parse2, Error, RangeLimits, Result};
+use syn::{
+    Error,
+    Expr::{self, Lit},
+    ExprLit,
+    Lit::Int,
+    RangeLimits, Result,
+};
 
-pub(crate) fn range_from_expr(range: syn::PatRange) -> Result<RangeInclusive<usize>> {
-    let lo_expr_token = range.lo.to_token_stream();
-    let lo_lit = parse2::<syn::LitInt>(lo_expr_token)?;
-    let lo_value = lo_lit.base10_parse::<usize>()?;
-
-    match range.limits {
-        RangeLimits::Closed(_) => {}
-        _ => {
-            return Err(Error::new_spanned(
-                range.limits.to_token_stream(),
-                "Only RangeInclusive supported",
-            ));
+pub(crate) fn range_from_expr(expr: &Expr) -> Result<RangeInclusive<usize>> {
+    if let Expr::Range(range) = expr {
+        let mut lo_value = 0;
+        if let Some(Lit(ExprLit {
+            lit: Int(int_lit), ..
+        })) = range.from.as_deref()
+        {
+            lo_value = int_lit.base10_parse::<usize>()?;
         }
-    };
 
-    let hi_expr_token = range.hi.to_token_stream();
-    let hi_lit = parse2::<syn::LitInt>(hi_expr_token)?;
-    let hi_value = hi_lit.base10_parse::<usize>()?;
-
-    Ok(lo_value..=hi_value)
+        let hi = range.to.as_deref().ok_or(Error::new_spanned(
+            expr.to_token_stream(),
+            "The range should be bounded",
+        ))?;
+        let mut hi_value = if let Lit(ExprLit {
+            lit: Int(int_lit), ..
+        }) = hi
+        {
+            int_lit.base10_parse::<usize>()?
+        } else {
+            Err(Error::new_spanned(expr, ""))?
+        };
+        if let RangeLimits::HalfOpen(_) = range.limits {
+            hi_value -= 1
+        }
+        return Ok(lo_value..=hi_value);
+    } else if let Expr::Lit(ExprLit {
+        lit: Int(int_lit), ..
+    }) = expr
+    {
+        let lit_value = int_lit.base10_parse::<usize>()?;
+        return Ok(lit_value..=lit_value);
+    } else {
+        return Err(Error::new_spanned(
+            expr.to_token_stream(),
+            "Only literal range or literal int is suppored",
+        ));
+    }
 }
