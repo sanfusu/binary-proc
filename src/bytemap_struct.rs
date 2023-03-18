@@ -19,10 +19,10 @@
 use std::ops::RangeInclusive;
 
 use quote::ToTokens;
-use syn::{parse::Parse, parse2, Data, DeriveInput, Result};
+use syn::{parse::Parse, parse2, Data, DeriveInput, Error, Result};
 
 use crate::literal_pos::range_from_expr;
-
+#[derive(Clone)]
 pub(crate) struct ByteField {
     pub(crate) pos: syn::ExprRange,
     pub(crate) ident: syn::Ident,
@@ -101,6 +101,22 @@ impl Parse for BytemapStruct {
                 fields.push(byte_field);
             }
         }
+        fields.sort_by(|x, y| x.pos_value.to_owned().cmp(y.pos_value.to_owned()));
+        fields
+            .clone()
+            .into_iter()
+            .try_fold(None, |prev: Option<ByteField>, curr| match prev {
+                Some(prev_field) => {
+                    if prev_field.pos_value.contains(curr.pos_value.start()) {
+                        return Err(Error::new_spanned(curr.pos, "position overlapped"));
+                    } else {
+                        return Ok(Some(curr));
+                    }
+                }
+                None => {
+                    return Ok(Some(curr));
+                }
+            })?;
         Ok(BytemapStruct {
             fields,
             clean_struct: Self::clean(derive_input.to_token_stream().into())?,
