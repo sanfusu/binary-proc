@@ -5,6 +5,7 @@ use bitmap_struct::BitmapStruct;
 use bytemap_struct::BytemapStruct;
 use container_type::ContainerType;
 use proc_macro::TokenStream;
+use quote::format_ident;
 use syn::parse_macro_input;
 
 extern crate quote;
@@ -23,7 +24,10 @@ pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let clean = bytemap.clean_struct.to_owned();
     let (impl_generics, ty_generics, where_clause) = clean.generics.split_for_impl();
     let mut bits_read = proc_macro2::TokenStream::new();
-    for field in bytemap.fields {
+    let mut iter_fields = proc_macro2::TokenStream::new();
+    let mut iter_fields_into = proc_macro2::TokenStream::new();
+    let mut next_return = proc_macro2::TokenStream::new();
+    for field in bytemap.fields.clone() {
         let field_ident = field.ident;
         let field_pos = field.pos;
         let target_type = field.target_type;
@@ -31,7 +35,26 @@ pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
             #field_ident: <#target_type>::try_from(value.get(#field_pos).ok_or(#field_pos)?).map_err(|_|{#field_pos})?,
         };
         bits_read.extend(field_read);
+        let iter_field_name = format_ident!("{}_iter", field_ident);
+        let iter_field = quote::quote! {
+            #iter_field_name: <#target_type as ::core::iter::IntoIterator>::IntoIter,
+        };
+        let iter_field_into = quote::quote! {
+            #iter_field_name: self.#field_ident.into_iter(),
+        };
+        let next_field_return = quote::quote! {
+            if (#field_pos).contains(&self._current_idx) {
+                self._current_idx += 1;
+                return self.#iter_field_name.next();
+            }
+        };
+        iter_fields.extend(iter_field);
+        next_return.extend(next_field_return);
+        iter_fields_into.extend(iter_field_into);
     }
+    let limit = bytemap.fields.last().unwrap().pos_value.end();
+    let iter_name = format_ident!("{}Iter", ident);
+
     quote::quote! {
         #clean
         impl #impl_generics ::core::convert::TryFrom<&[u8]> for #ident #ty_generics #where_clause {
@@ -40,6 +63,31 @@ pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 Ok(Self {
                     #bits_read
                 })
+            }
+        }
+        impl #impl_generics ::core::iter::IntoIterator for #ident #ty_generics #where_clause {
+            type Item = u8;
+            type IntoIter = #iter_name;
+            fn into_iter(self) -> Self::IntoIter {
+                #iter_name {
+                    #iter_fields_into
+                    _current_idx: 0usize,
+                }
+            }
+        }
+        pub struct #iter_name #ty_generics {
+            #iter_fields
+            _current_idx:usize,
+        }
+        impl #impl_generics ::core::iter::Iterator for #iter_name #ty_generics #where_clause {
+            type Item = u8;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self._current_idx > #limit {
+                    return None;
+                }
+                #next_return
+                self._current_idx += 1;
+                return Some(0);
             }
         }
     }
