@@ -23,24 +23,37 @@ pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let ident = bytemap.clean_struct.to_owned().ident;
     let clean = bytemap.clean_struct.to_owned();
     let (impl_generics, ty_generics, where_clause) = clean.generics.split_for_impl();
-    let mut bits_read = proc_macro2::TokenStream::new();
-    let mut iter_fields = proc_macro2::TokenStream::new();
-    let mut iter_fields_into = proc_macro2::TokenStream::new();
+    let mut bytes_read_from_le = proc_macro2::TokenStream::new();
+    let mut bytes_read_from_be = proc_macro2::TokenStream::new();
+    let mut le_iter_fields = proc_macro2::TokenStream::new();
+    let mut be_iter_fields = proc_macro2::TokenStream::new();
+    let mut le_iter_fields_into = proc_macro2::TokenStream::new();
+    let mut be_iter_fields_into = proc_macro2::TokenStream::new();
     let mut next_return = proc_macro2::TokenStream::new();
     for field in bytemap.fields.clone() {
         let field_ident = field.ident;
         let field_pos = field.pos;
         let target_type = field.target_type;
-        let field_read = quote::quote! {
-            #field_ident: <#target_type>::try_from(value.get(#field_pos).ok_or(#field_pos)?).map_err(|_|{#field_pos})?,
+        let field_read_from_le = quote::quote! {
+            #field_ident: <#target_type>::try_from(::binary::endian::Le(value.0.get(#field_pos).ok_or(#field_pos)?)).map_err(|_|{#field_pos})?,
         };
-        bits_read.extend(field_read);
+        let field_read_from_be = quote::quote! {
+            #field_ident: <#target_type>::try_from(::binary::endian::Be(value.0.get(#field_pos).ok_or(#field_pos)?)).map_err(|_|{#field_pos})?,
+        };
+        bytes_read_from_le.extend(field_read_from_le);
+        bytes_read_from_be.extend(field_read_from_be);
         let iter_field_name = format_ident!("{}_iter", field_ident);
-        let iter_field = quote::quote! {
-            #iter_field_name: <#target_type as ::core::iter::IntoIterator>::IntoIter,
+        let le_iter_field = quote::quote! {
+            #iter_field_name: <#target_type as ::binary::endian::IntoLeIter>::IntoIter,
         };
-        let iter_field_into = quote::quote! {
-            #iter_field_name: self.#field_ident.into_iter(),
+        let be_iter_field = quote::quote! {
+            #iter_field_name: <#target_type as ::binary::endian::IntoBeIter>::IntoIter,
+        };
+        let le_iter_field_into = quote::quote! {
+            #iter_field_name: self.#field_ident.into_leiter(),
+        };
+        let be_iter_field_into = quote::quote! {
+            #iter_field_name: self.#field_ident.into_beiter(),
         };
         let next_field_return = quote::quote! {
             if (#field_pos).contains(&self._current_idx) {
@@ -48,38 +61,39 @@ pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 return self.#iter_field_name.next();
             }
         };
-        iter_fields.extend(iter_field);
+        le_iter_fields.extend(le_iter_field);
+        be_iter_fields.extend(be_iter_field);
         next_return.extend(next_field_return);
-        iter_fields_into.extend(iter_field_into);
+        le_iter_fields_into.extend(le_iter_field_into);
+        be_iter_fields_into.extend(be_iter_field_into);
     }
     let limit = bytemap.fields.last().unwrap().pos_value.end();
-    let iter_name = format_ident!("{}Iter", ident);
+    let le_iter_name = format_ident!("{}LeIter", ident);
+    let be_iter_name = format_ident!("{}BeIter", ident);
 
     quote::quote! {
         #clean
-        impl #impl_generics ::core::convert::TryFrom<&[u8]> for #ident #ty_generics #where_clause {
+        impl #impl_generics ::core::convert::TryFrom<::binary::endian::Le<&[u8]>> for #ident #ty_generics #where_clause {
             type Error = ::core::ops::RangeInclusive<usize>;
-            fn try_from(value:&[u8])->Result<Self, Self::Error> {
+            fn try_from(value: ::binary::endian::Le<&[u8]>)->Result<Self, Self::Error> {
                 Ok(Self {
-                    #bits_read
+                    #bytes_read_from_le
                 })
             }
         }
-        impl #impl_generics ::core::iter::IntoIterator for #ident #ty_generics #where_clause {
-            type Item = u8;
-            type IntoIter = #iter_name;
-            fn into_iter(self) -> Self::IntoIter {
-                #iter_name {
-                    #iter_fields_into
-                    _current_idx: 0usize,
-                }
+        impl #impl_generics ::core::convert::TryFrom<::binary::endian::Be<&[u8]>> for #ident #ty_generics #where_clause {
+            type Error = ::core::ops::RangeInclusive<usize>;
+            fn try_from(value: ::binary::endian::Be<&[u8]>)->Result<Self, Self::Error> {
+                Ok(Self {
+                    #bytes_read_from_be
+                })
             }
         }
-        pub struct #iter_name #ty_generics {
-            #iter_fields
+        pub struct #le_iter_name #ty_generics {
+            #le_iter_fields
             _current_idx:usize,
         }
-        impl #impl_generics ::core::iter::Iterator for #iter_name #ty_generics #where_clause {
+        impl #impl_generics ::core::iter::Iterator for #le_iter_name #ty_generics #where_clause {
             type Item = u8;
             fn next(&mut self) -> Option<Self::Item> {
                 if self._current_idx > #limit {
@@ -88,6 +102,41 @@ pub fn bytemap(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #next_return
                 self._current_idx += 1;
                 return Some(0);
+            }
+        }
+        impl #impl_generics ::binary::endian::IntoLeIter for #ident #ty_generics #where_clause {
+            type Item = u8;
+            type IntoIter = #le_iter_name;
+            fn into_leiter(self) -> Self::IntoIter {
+                #le_iter_name {
+                    #le_iter_fields_into
+                    _current_idx: 0usize,
+                }
+            }
+        }
+        pub struct #be_iter_name #ty_generics {
+            #be_iter_fields
+            _current_idx:usize,
+        }
+        impl #impl_generics ::core::iter::Iterator for #be_iter_name #ty_generics #where_clause {
+            type Item = u8;
+            fn next(&mut self) -> Option<Self::Item> {
+                if self._current_idx > #limit {
+                    return None;
+                }
+                #next_return
+                self._current_idx += 1;
+                return Some(0);
+            }
+        }
+        impl #impl_generics ::binary::endian::IntoBeIter for #ident #ty_generics #where_clause {
+            type Item = u8;
+            type IntoIter = #be_iter_name;
+            fn into_beiter(self) -> Self::IntoIter {
+                #be_iter_name {
+                    #be_iter_fields_into
+                    _current_idx: 0usize,
+                }
             }
         }
     }
