@@ -203,8 +203,17 @@ pub fn restrict(_attr: TokenStream, _item: TokenStream) -> TokenStream {
     restrict_enum.variant.into_iter().for_each(|x| {
         let ident = x.ident;
         let expr = x.restrict.white_list;
-        let tmp = quote::quote! {
-            #(#expr)|* => Ok(Self::#ident),
+        let tmp = match x.target_type {
+            Some(ty) => {
+                quote::quote! {
+                    #(#expr)|* => Ok(Self::#ident(#ty::try_from(value).map_err(|_| value)?)),
+                }
+            }
+            None => {
+                quote::quote! {
+                    #(#expr)|* => Ok(Self::#ident),
+                }
+            }
         };
         match_expr.extend(tmp);
     });

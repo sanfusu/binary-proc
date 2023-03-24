@@ -1,5 +1,7 @@
 use quote::ToTokens;
-use syn::{parse::Parse, punctuated::Punctuated, Data, DeriveInput, Expr, Result, Token};
+use syn::{
+    parse::Parse, punctuated::Punctuated, Data, DeriveInput, Error, Expr, Result, Token, Type,
+};
 
 const TOP_LEVEL_PATH: &'static str = "restrict";
 const SECOND_LEVEL_PATH: &'static str = "white_list";
@@ -25,21 +27,48 @@ impl Parse for AllowedRange {
 pub(crate) struct RestrictVariant {
     pub(crate) ident: syn::Ident,
     pub(crate) restrict: AllowedRange,
+    pub(crate) target_type: Option<Type>,
 }
 
 impl Parse for RestrictVariant {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let ident = input.parse::<syn::Variant>()?;
+        let variant = input.parse::<syn::Variant>()?;
+        if variant.fields.len() > 1 {
+            return Err(Error::new_spanned(
+                variant.to_token_stream(),
+                "Only zero or none fields is supported",
+            ));
+        }
+        let mut target_type = None;
+        for field in variant.fields.iter() {
+            if field.ident != None {
+                return Err(Error::new_spanned(
+                    field.to_token_stream(),
+                    "Only tuple is supported",
+                ));
+            }
+            target_type = Some(field.ty.to_owned());
+        }
         let mut white_list = Vec::new();
-        for attr in ident.attrs {
+        for attr in &variant.attrs {
             if attr.path.to_token_stream().to_string() == SECOND_LEVEL_PATH {
                 let mut current_list = attr.parse_args::<AllowedRange>()?.white_list;
                 white_list.append(&mut current_list);
             }
         }
+        if white_list.is_empty() {
+            return Err(Error::new_spanned(
+                variant.to_token_stream(),
+                "white_list must be specified",
+            ));
+        }
         let restrict = AllowedRange { white_list };
-        let ident = ident.ident;
-        Ok(RestrictVariant { ident, restrict })
+        let ident = variant.ident;
+        Ok(RestrictVariant {
+            ident,
+            restrict,
+            target_type,
+        })
     }
 }
 
@@ -68,13 +97,11 @@ impl Parse for RestrictEnum {
         let pure_enum = Self::clean(derive_input.to_owned().to_token_stream().into())?;
         let mut variant = Vec::new();
         if let Data::Enum(data_enum) = derive_input.data {
-            data_enum.variants.into_iter().for_each(|raw_variant| {
+            for raw_variant in data_enum.variants.into_iter() {
                 let token = raw_variant.to_token_stream();
-                let restrict_variant = syn::parse2::<RestrictVariant>(token);
-                if let Ok(x) = restrict_variant {
-                    variant.push(x);
-                }
-            });
+                let restrict_variant = syn::parse2::<RestrictVariant>(token)?;
+                variant.push(restrict_variant);
+            }
         }
         Ok(RestrictEnum { pure_enum, variant })
     }
